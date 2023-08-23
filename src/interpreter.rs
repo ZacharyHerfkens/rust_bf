@@ -3,7 +3,28 @@ use std::io::{Read, Write, ErrorKind};
 use crate::parser::Instruction;
 
 
-pub fn run<R: Read, W: Write>(program: &[Instruction], mut input: R, mut output: W) -> Result<(), String> {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Error {
+    MemoryOutOfBounds,
+    ReadError(String),
+    WriteError(String),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use Error::*;
+        match self {
+            MemoryOutOfBounds => write!(f, "Memory out of bounds"),
+            ReadError(e) => write!(f, "Read error: {}", e),
+            WriteError(e) => write!(f, "Write error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+
+pub fn run<R: Read, W: Write>(program: &[Instruction], mut input: R, mut output: W) -> Result<(), Error> {
     let mut memory = Memory::new(2_usize.pow(16));
     let mut ip = 0;
 
@@ -17,10 +38,10 @@ pub fn run<R: Read, W: Write>(program: &[Instruction], mut input: R, mut output:
                 memory.add_cell(-1);
             }
             Instruction::IncPtr => {
-                memory.move_ptr(1);
+                memory.move_ptr(1)?;
             }
             Instruction::DecPtr => {
-                memory.move_ptr(-1);
+                memory.move_ptr(-1)?;
             }
             Instruction::JumpIfZero(pos) => {
                 if memory.get_cell() == 0 {
@@ -44,16 +65,16 @@ pub fn run<R: Read, W: Write>(program: &[Instruction], mut input: R, mut output:
     Ok(())
 }
 
-pub fn write_byte<W: Write>(mut w: W, byte: u8) -> Result<(), String> {
-    w.write_all(&[byte]).map_err(|e| e.to_string())
+pub fn write_byte<W: Write>(mut w: W, byte: u8) -> Result<(), Error> {
+    w.write_all(&[byte]).map_err(|e| Error::WriteError(e.to_string()))
 }
 
-pub fn read_byte<R: Read>(mut r: R) -> Result<u8, String> {
+pub fn read_byte<R: Read>(mut r: R) -> Result<u8, Error> {
     let mut buf = [0; 1];
     match r.read_exact(&mut buf) {
         Ok(_) => {},
         Err(ref e) if e.kind() == ErrorKind::UnexpectedEof => return Ok(0),
-        Err(e) => return Err(e.to_string()),
+        Err(e) => return Err(Error::ReadError(e.to_string())),
     }
     Ok(buf[0])
 }
@@ -71,12 +92,14 @@ impl Memory {
         }
     }
 
-    pub fn move_ptr(&mut self, offset: isize) {
-        let new_ptr = self.ptr.checked_add_signed(offset);
-        match new_ptr {
-            Some(p) => self.ptr = p,
-            None => panic!("Pointer out of bounds"),
+    pub fn move_ptr(&mut self, offset: isize) -> Result<(), Error>{
+        let new_ptr = self.ptr.checked_add_signed(offset)
+            .ok_or(Error::MemoryOutOfBounds)?;
+        if new_ptr >= self.cells.len() {
+            return Err(Error::MemoryOutOfBounds);
         }
+        self.ptr = new_ptr;
+        Ok(())
     }
 
     pub fn add_cell(&mut self, val: i8) {
