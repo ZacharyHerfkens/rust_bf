@@ -24,12 +24,43 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 
-pub fn run<R: Read, W: Write>(program: &[Instruction], mut input: R, mut output: W) -> Result<(), Error> {
-    let mut memory = Memory::new(2_usize.pow(16));
+pub struct Settings<R: Read, W: Write> {
+    pub max_memory: usize,
+    pub max_steps: Option<usize>,
+    pub input: R,
+    pub output: W,
+}
+
+impl std::default::Default for Settings<std::io::Stdin, std::io::Stdout> {
+    fn default() -> Self {
+        Self {
+            max_memory: 2_usize.pow(16),
+            max_steps: None,
+            input: std::io::stdin(),
+            output: std::io::stdout(),
+        }
+    }
+}
+
+
+pub fn run<R: Read, W: Write>(program: &[Instruction], settings: Settings<R, W>) -> Result<(), Error> {
+    let mut memory = Memory::new(settings.max_memory);
     let mut ip = 0;
+    let Settings {
+        mut input,
+        mut output,
+        max_steps,
+        ..
+    } = settings;
+    let mut step_count = 0;
 
     while let Some(instruction) = program.get(ip) {
+        if max_steps.map(|max| step_count >= max).unwrap_or(false) {
+            return Ok(())
+        }
+
         ip += 1;
+        step_count += 1;
         match instruction {
             Instruction::IncCell => {
                 memory.add_cell(1);
